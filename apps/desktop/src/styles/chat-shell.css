@@ -37,6 +37,8 @@
 }
 
 .main-pane {
+  /* The visible content pane supersedes the shell anchor for body toasts. */
+  anchor-name: --toast-content;
   position: relative;
   display: flex;
   /* MainChat is the first-priority column and must never be compressed below

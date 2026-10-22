@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -98,6 +98,37 @@ function mockHost(handler) {
     call: async (method, params) => handler(method, params),
   };
 }
+
+test("steering preserves an aborted replacement while its streaming reservation is being written", { timeout: 60_000 }, async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-steering-outbox-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const started = Promise.withResolvers();
+  const release = Promise.withResolvers();
+  const rows = new Map();
+  const host = mockHost(async (_method, { message }) => {
+    if (message.status === "streaming") {
+      started.resolve();
+      await release.promise;
+    }
+    rows.set(message.id, message);
+  });
+  const outbox = new PersistenceOutbox(dir, silent);
+  const enqueue = (message) => outbox.enqueue({
+    key: `message:session:${message.id}`, sessionId: "session", turnId: "turn", message,
+  }, () => host);
+  await enqueue({ id: "partial", role: "assistant", content: "Inspecting.", status: "streaming" });
+  await started.promise;
+  try {
+    await enqueue({ id: "question", role: "user", content: "Are you stuck?", steering: true });
+    await enqueue({ id: "partial", role: "assistant", content: "Inspecting.", status: "aborted" });
+    await enqueue({ id: "answer", role: "assistant", content: "No.", status: "complete" });
+  } finally { release.resolve(); }
+  await outbox.flush(() => host);
+  assert.deepEqual([...rows.keys()], ["partial", "question", "answer"]);
+  assert.equal(rows.get("partial").status, "aborted");
+  assert.equal(outbox.size(), 0);
+  assert.deepEqual(JSON.parse(await readFile(join(dir, "session-message-outbox.json"), "utf8")), []);
+});
 
 test("duplicate message id does not stall later outbox entries (D444)", async () => {
   const dir = await mkdtemp(join(tmpdir(), "pi-outbox-"));

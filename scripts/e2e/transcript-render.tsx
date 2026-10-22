@@ -38,6 +38,7 @@ declare global {
   var transcriptLongHistoryProbe: typeof runLongHistoryProbe;
   var resetContextOverflowRecoveryProbe: () => Promise<void>;
   var contextOverflowRecoveryProbe: (events: AgentEventEnvelope[]) => Promise<unknown>;
+  var steeringRecoveryProbe: (events: AgentEventEnvelope[]) => Promise<unknown>;
 }
 
 globalThis.transcriptLongHistoryProbe = runLongHistoryProbe;
@@ -365,6 +366,29 @@ globalThis.resetContextOverflowRecoveryProbe = async () => {
       transcriptDisplayMode: "command-first",
     },
   });
+};
+
+globalThis.steeringRecoveryProbe = async (events) => {
+  await globalThis.resetContextOverflowRecoveryProbe();
+  assert(recoveryState && recoveryRoot && recoveryHost && recoveryI18n, "Missing steering fixture");
+  for (const event of events) recoveryState.handleAgentEvent(event);
+  const messages = recoveryState.messages;
+  const question = messages.findIndex((row) => row.id === "steering-user");
+  const answer = messages.findIndex((row) => row.content === "No, I am not stuck.");
+  assert(question >= 0 && answer > question, "Store placed the answer before the correction");
+  flushSync(() => recoveryRoot!.render(
+    <I18nextProvider i18n={recoveryI18n!}>
+      <ChatTranscript sessionId="context-overflow-fixture" messages={messages} isRunning={false} />
+    </I18nextProvider>,
+  ));
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  const questionRow = recoveryHost.querySelector('[data-message-id="steering-user"]');
+  const answerRow = recoveryHost.querySelector(`[data-message-id="${messages[answer].id}"]`);
+  assert(questionRow && answerRow, "Question and answer must both render");
+  assert(questionRow.compareDocumentPosition(answerRow) & Node.DOCUMENT_POSITION_FOLLOWING,
+    "Rendered answer must follow the question");
+  assert(answerRow.textContent?.includes("No, I am not stuck."), "Recovered answer text is missing");
+  return { ok: true, storeOrder: true, renderedOrder: true };
 };
 
 globalThis.contextOverflowRecoveryProbe = async (events) => {

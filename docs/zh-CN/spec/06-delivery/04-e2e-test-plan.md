@@ -9872,3 +9872,35 @@ host-created files. The full app's file-preview viewer is covered separately.
 - **关联规格**：`04-ux/01-ui-ia.md` §3.2、`04-ux/06-settings-ia.md`（常规 → 侧边栏卡片）。
 - **验收**：项目折叠时仍能回答“这里是否有正在运行的工作”，且两种提示可从持久化设置独立控制。
 - **状态**：草稿。现有 `apps/desktop/test/sidebar-project-runs.test.mjs` 覆盖数量分类、总开关与子开关门控、两种渲染入口，以及主题令牌和减少动态效果保证；它不覆盖设置 API 缺省值规范化或完整交互，相关场景仍需在可用环境手动验证。
+
+
+#### E2E-TOAST-content-pane-bounds: Keep notifications inside the main content pane
+
+- **Preconditions**: An isolated Electron renderer using production ToastHost
+  and shell/column/toast CSS; no live provider or user data.
+- **Steps**: Show a long Chinese notification beside an expanded sidebar and
+  docked work panel. Resize each column, collapse the sidebar, close the panel,
+  switch to Settings, maximize the panel and narrow the content pane. Inspect
+  actual toast bounds and the dismiss hit target. Unmount the surface.
+- **Expected**: The notification stays centered and contained horizontally in
+  the main pane, or the full shell when no main pane is visible. The body portal,
+  dismissal and portal cleanup remain intact.
+- **Regression**: Before the fix, toast bounds [445, 805] exceed main-pane
+  bounds [320, 770] in a 1250px three-column fixture (#1820).
+- **Status**: Automated by `node scripts/e2e-toast-layout.mjs`. Existing
+  `node scripts/e2e-question-notification.mjs` covers notification navigation,
+  text selection, timer pause, dismissal and keyboard activation.
+
+#### E2E-STEERING-recovery-order: Keep a recovered answer after accepted input
+
+- **Preconditions**: A controlled model stream and the real Agent runtime.
+- **Steps**: Start a reply, accept a correction, fail the stream and recover.
+  Inspect the retry request and replay events through the production renderer
+  store and transcript. Repeat admission during retry backoff in runtime tests.
+- **Expected**: The retry receives the correction. The preceding partial remains
+  aborted before it; the recovered answer has a distinct id after it. The same
+  durable turn emits one public agent start/end. Recovery without newly consumed
+  input continues to reuse the original reply id.
+- **Status**: Runtime regression (`runtime.test.ts`) and isolated Electron
+  integration (`node scripts/e2e-transcript-render.mjs`, steering recovery probe).
+  Real Host persistence/restart acceptance is a separate check.

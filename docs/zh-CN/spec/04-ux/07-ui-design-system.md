@@ -1068,7 +1068,7 @@ Linux 保留淡入淡出和滑动退出。
 
 | 财产 | 价值 |
 |---|---|
-| 职位 | 顶部中心视口，距顶部边缘 16 像素，`width: min(360px, 100vw − 32px)` |
+| Position | Top-center of the visible main pane (full shell when absent), 16px from the top; maximum 360px wide with 16px side margins |
 | 表面 | `bg-elevated-opaque` + 1px `border-subtle` + `shadow-dialog`（与浮动菜单同族） |
 | 半径 | 半径 md 加 |
 | 字体 | 文本 md、前导紧凑加 |

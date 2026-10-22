@@ -161,6 +161,7 @@ html {
 }
 
 .app-shell {
+  anchor-name: --toast-content;
   position: relative;
   isolation: isolate;
   display: flex;

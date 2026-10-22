@@ -5194,6 +5194,74 @@ describe("DesktopAgentRuntime assistant thinking events", () => {
     await runtime.dispose();
   });
 
+  it.each(["stream", "backoff"] as const)("keeps a recovery reply after steering accepted during %s (issue #1699)", async (timing) => {
+    const onEvent = vi.fn();
+    const runtime = createRuntime({ onEvent });
+    const requests: AgentMessage[][] = [];
+    const internals = runtime as unknown as {
+      models: { streamSimple: (model: unknown, context: { messages: AgentMessage[] }) => ReturnType<typeof createAssistantMessageEventStream> };
+    };
+    internals.models = { streamSimple: (_model, context) => {
+      requests.push([...context.messages]);
+      const first = requests.length === 1;
+      const message = {
+        ...assistantMessage({ content: [{ type: "text", text: first ? "Inspecting the plugin." : "No, I am not stuck." }] }),
+        ...(first ? { stopReason: "error", errorMessage: "stream terminated" } : {}),
+      } as AssistantMessage;
+      const stream = createAssistantMessageEventStream();
+      queueMicrotask(() => {
+        stream.push({ type: "start", partial: message });
+        if (first) {
+          stream.push({ type: "error", reason: "error", error: message });
+        } else stream.push({ type: "done", reason: "stop", message });
+        stream.end(message);
+      });
+      return stream;
+    } };
+    let steered = false;
+    onEvent.mockImplementation((envelope: AgentEventEnvelope) => {
+      const admissionPoint = timing === "stream"
+        ? envelope.event.type === "message_start" && envelope.event.message.role === "assistant"
+        : envelope.event.type === "status" && envelope.event.status.activity?.phase === "retrying";
+      if (!steered && admissionPoint) {
+        steered = true;
+        runtime.steer({ text: "Are you stuck?" }, "active-turn", {
+          id: "steering-user", role: "user", content: "Are you stuck?",
+          createdAt: new Date().toISOString(), status: "complete", steering: true,
+        });
+      }
+    });
+    vi.useFakeTimers();
+    try {
+      const running = runtime.prompt("Inspect the plugin.", "initial-user", "active-turn");
+      await vi.runAllTimersAsync();
+      await running;
+      expect(requests).toHaveLength(2);
+      expect(JSON.stringify(requests[1])).toContain("Are you stuck?");
+      const transcript = new Map<string, UiMessage>();
+      for (const [envelope] of onEvent.mock.calls) {
+        const event = (envelope as AgentEventEnvelope).event;
+        if (event.type === "message_start" || event.type === "message_update" || event.type === "message_end") {
+          transcript.set(event.message.id, event.message);
+        }
+      }
+      const rows = [...transcript.values()];
+      const answer = rows.findIndex((row) => row.content === "No, I am not stuck.");
+      const question = rows.findIndex((row) => row.id === "steering-user");
+      expect(question).toBeGreaterThanOrEqual(0);
+      expect(answer).toBeGreaterThan(question);
+      expect(rows[0]).toMatchObject({ content: "Inspecting the plugin.", status: "aborted" });
+      expect(rows[answer].id).not.toBe(rows[0].id);
+      const events = onEvent.mock.calls.map(([envelope]) => (envelope as AgentEventEnvelope).event);
+      expect(events.filter((event) => event.type === "agent_start")).toHaveLength(1);
+      expect(events.filter((event) => event.type === "agent_end")).toHaveLength(1);
+      expect(events.some((event) => event.type === "error")).toBe(false);
+    } finally {
+      vi.useRealTimers();
+      await runtime.dispose();
+    }
+  });
+
   it("does not continue steering after a recovery becomes pending", async () => {
     const runtime = createRuntime({ onEvent: vi.fn() });
     const agent = (runtime as any).agent;

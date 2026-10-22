@@ -2606,6 +2606,13 @@ Live Voice 受现有开发者模式和开发构建门控约束，包含四种展
 - 每张卡片：16px 变体图标（语义色调）·消息·X 关闭按钮
 - Surface：`bg-elevated-opaque` + 1px `border-subtle` + `shadow-dialog`，radius-md-plus — 与菜单相同的浮动系列； [07-ui-design-system.md §11.8](/zh-CN/spec/04-ux/07-ui-design-system#_11-8-toast) 中的指标
 
+The body-level portal stays above dialog scrims. Its horizontal center and
+maximum width follow the visible main content pane, with 16px side margins and
+a 360px width cap, so a docked work panel's toolbar stays unobstructed (#1820).
+CSS anchor positioning follows column resizes and transitions without moving
+the portal into the shell's stacking context. Settings and maximized-panel
+states without a visible main pane use the shell's full width.
+
 ### 17.3 API
 
 状态位于应用商店中 (`useAppStore`)：

@@ -3883,6 +3883,13 @@ Transient, non-blocking feedback for completed actions and failures that have no
 - Each card: 16px variant icon (semantic tint) · message · X dismiss button
 - Surface: `bg-elevated-opaque` + 1px `border-subtle` + `shadow-dialog`, radius-md-plus — same floating family as menus; metrics in [07-ui-design-system.md §11.8](07-ui-design-system.md#118-toast)
 
+The body-level portal stays above dialog scrims. Its horizontal center and
+maximum width follow the visible main content pane, with 16px side margins and
+a 360px width cap, so a docked work panel's toolbar stays unobstructed (#1820).
+CSS anchor positioning follows column resizes and transitions without moving
+the portal into the shell's stacking context. Settings and maximized-panel
+states without a visible main pane use the shell's full width.
+
 ### 17.3 API
 
 State lives in the app store (`useAppStore`):

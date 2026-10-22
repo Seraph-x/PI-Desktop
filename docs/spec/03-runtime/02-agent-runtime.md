@@ -100,6 +100,13 @@ from pi's steering queue so it cannot execute independently on a later turn.
 An ordinary follow-up stays in the separate Host-owned FIFO until durable turn
 finalization. A steering failure must not terminate the active run.
 
+If recovery still holds the preceding assistant reply open when steering
+enters the model context, that partial reply is finalized as aborted. The reply
+to the new input starts with a new message id after the input row, instead of
+rewriting the reserved preceding reply (issue #1699). Recovery without newly
+consumed input keeps the existing bubble id. The durable turn, recovery budgets,
+and single terminal lifecycle remain unchanged.
+
 ### 4.1 Session title generation
 
 The core keeps new sessions readable without any model call. Sending the first
@@ -257,7 +264,8 @@ wait.
 
 Only the failed request is replayed. The session, its transcript, and its tool
 state are untouched: the failed assistant is removed from the next model context
-and the same visible message id is reused, so a retry never restarts the turn or
+and the same visible message id is reused unless new steering input has been
+consumed (§4.0), so a retry never restarts the turn or
 re-runs a completed tool call.
 
 The application setting `infiniteProviderRetry` is off by default. When enabled,

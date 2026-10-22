@@ -8015,15 +8015,15 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
               ? { providerWaitMs: cumulativeProviderWaitMs }
               : {}),
           };
+          this.providerRetryInProgress = false;
+          this.overflowRecoveryInProgress = false;
+          this.silentTurnRerunInProgress = false;
+          this.progressTurnRerunInProgress = false;
           if (retryingAssistant) {
             // Keep one visible assistant bubble across the bounded retry. The
             // failed partial response is replaced instead of leaving a
             // duplicate error row when the second request succeeds. The same
             // applies to a silent-turn re-run: one bubble, no empty row.
-            this.providerRetryInProgress = false;
-            this.overflowRecoveryInProgress = false;
-            this.silentTurnRerunInProgress = false;
-            this.progressTurnRerunInProgress = false;
             this.emit({ type: "message_update", message: this.currentAssistant });
           } else {
             this.emit({ type: "message_start", message: this.currentAssistant });
@@ -8089,6 +8089,12 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
               this.setAgentTools(this.activeTools());
             }
             this.pendingSteering.delete(event.message);
+            // Recovery may hold the preceding reply open. New input needs its
+            // answer after the user row, without rewriting that earlier reply.
+            if (this.currentAssistant) {
+              this.emit({ type: "message_end", message: { ...this.currentAssistant, status: "aborted" } });
+              this.currentAssistant = undefined;
+            }
             // User input is now part of the model context: whatever the model
             // says next answers the user, not a completion notice, so the
             // ordinary response contract applies again.

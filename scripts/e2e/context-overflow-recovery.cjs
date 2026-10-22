@@ -124,8 +124,54 @@ module.exports = async function runContextOverflowRecovery(window) {
     assert.equal(recovered.phase, "complete");
     assert.equal(recovered.assistantId, recovered.initialAssistantId);
     assert.equal(recovered.assistantCount, 1);
-    return { ok: true, recovery: recovered };
+    const steering = await runSteeringRecovery(window);
+    return { ok: true, recovery: recovered, steering };
   } finally {
     await runtime.dispose();
   }
 };
+
+async function runSteeringRecovery(window) {
+  const { createAssistantMessageEventStream } = require("../../packages/agent-runtime/node_modules/@earendil-works/pi-ai");
+  const events = [];
+  const requests = [];
+  let steered = false;
+  const runtime = new DesktopAgentRuntime({
+    host: { call: async () => undefined, onNotification: () => () => undefined },
+    sessionId: "context-overflow-fixture", mode: "agent", provider,
+    commandShell: { id: "bash", label: "Bash", dialect: "posix", available: true, isDefault: true },
+    thinkingLevel: "medium",
+    onEvent(envelope) {
+      events.push(envelope);
+      if (!steered && envelope.event.type === "message_start" && envelope.event.message.role === "assistant") {
+        steered = true;
+        runtime.steer({ text: "Are you stuck?" }, "steering-turn", {
+          id: "steering-user", role: "user", content: "Are you stuck?", steering: true,
+          createdAt: new Date().toISOString(), status: "complete",
+        });
+      }
+    },
+  });
+  runtime.models = { streamSimple(_model, context) {
+    requests.push(context.messages);
+    const first = requests.length === 1;
+    const message = {
+      ...assistantMessage([{ type: "text", text: first ? "Inspecting the plugin." : "No, I am not stuck." }]),
+      ...(first ? { stopReason: "error", errorMessage: "stream terminated" } : {}),
+    };
+    const stream = createAssistantMessageEventStream();
+    queueMicrotask(() => {
+      stream.push({ type: "start", partial: message });
+      stream.push(first ? { type: "error", reason: "error", error: message }
+        : { type: "done", reason: "stop", message });
+      stream.end(message);
+    });
+    return stream;
+  } };
+  try {
+    await runtime.prompt("Inspect the plugin.", "user-1", "steering-turn");
+    assert.equal(requests.length, 2);
+    assert.match(JSON.stringify(requests[1]), /Are you stuck\?/);
+    return await window.webContents.executeJavaScript(`window.steeringRecoveryProbe(${JSON.stringify(events)})`);
+  } finally { await runtime.dispose(); }
+}

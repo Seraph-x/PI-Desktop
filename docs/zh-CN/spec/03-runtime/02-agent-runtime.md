@@ -82,6 +82,14 @@ pi 消费排队输入时保留渲染器提供的消息 id；即使补充输入�
 普通 follow-up 仍留在独立的 Host FIFO 中，直到当前持久回合最终落定。
 补充指令失败不得终止当前运行。
 
+If recovery still holds the preceding assistant reply open when steering
+enters the model context, that partial reply is finalized as aborted. The reply
+to the new input starts with a new message id after the input row, instead of
+rewriting the reserved preceding reply (issue #1699). Recovery without newly
+consumed input keeps the existing bubble id. The durable turn, recovery budgets,
+and single terminal lifecycle remain unchanged.
+
+
 ### 4.1 会话标题生成
 
 核心让新会话无需任何模型调用即可读：当会话存储的标题仍是可识别的占位标题时，发送第一条
