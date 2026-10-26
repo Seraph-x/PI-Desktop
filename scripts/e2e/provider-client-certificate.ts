@@ -78,6 +78,9 @@ void app.whenReady().then(async () => {
     const baseUrl = `https://localhost:${address.port}/v1`;
     console.error("CERT_PHASE 2 before");
     await applyNetworkProxy({ mode: "direct" });
+    console.error("CERT_RESET_CONNECTIONS before");
+    await session.defaultSession.closeAllConnections();
+    console.error("CERT_RESET_CONNECTIONS after");
     console.error("CERT_PHASE 2 after");
     let baselineTimer: ReturnType<typeof setTimeout> | undefined;
     const baselineTimeout = new Promise<{ kind: "timeout" }>((resolve) => {
@@ -115,6 +118,9 @@ void app.whenReady().then(async () => {
     console.error("CERT_PHASE 5 after");
     console.error("CERT_PHASE 6 before");
     await applyNetworkProxy({ mode: "custom", url: `http://fixture:password@127.0.0.1:${proxyAddress.port}`, bypass: "<-loopback>" });
+    console.error("CERT_RESET_CONNECTIONS before");
+    await session.defaultSession.closeAllConnections();
+    console.error("CERT_RESET_CONNECTIONS after");
     console.error("CERT_PHASE 6 after");
     const before = tunnels;
     console.error("CERT_PHASE 7 before");
@@ -123,6 +129,9 @@ void app.whenReady().then(async () => {
     assert.ok(tunnels > before, "the retry must use the configured authenticated proxy");
     console.error("CERT_PHASE 8 before");
     await applyNetworkProxy({ mode: "custom", url: `http://fixture:password@127.0.0.1:${proxyAddress.port}` });
+    console.error("CERT_RESET_CONNECTIONS before");
+    await session.defaultSession.closeAllConnections();
+    console.error("CERT_RESET_CONNECTIONS after");
     console.error("CERT_PHASE 8 after");
     const beforeBypass = tunnels;
     console.error("CERT_PHASE 9 before");
@@ -131,6 +140,9 @@ void app.whenReady().then(async () => {
     assert.equal(tunnels, beforeBypass, "localhost bypass must apply to both transports");
     console.error("CERT_PHASE 10 before");
     await applyNetworkProxy({ mode: "direct" });
+    console.error("CERT_RESET_CONNECTIONS before");
+    await session.defaultSession.closeAllConnections();
+    console.error("CERT_RESET_CONNECTIONS after");
     console.error("CERT_PHASE 10 after");
     mode = "redirect";
     console.error("CERT_PHASE 11 before");
