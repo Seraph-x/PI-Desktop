@@ -295,7 +295,7 @@ test("a queued delete cannot switch to a different active session and releases i
   assert.deepEqual(h.state().messages, []);
 });
 
-test("a missing durable delete target restores the optimistic user-turn projection and cache", async () => {
+test("a missing durable delete target preserves its user-turn projection and cache", async () => {
   const durable = previous.filter((message) => message.id !== "u1");
   const cached = new Map();
   const h = harness({ runtime: {
@@ -311,7 +311,7 @@ test("a missing durable delete target restores the optimistic user-turn projecti
 
 for (const outcome of ["no-op", "failure"]) {
   for (const switchSession of [false, true]) {
-    test(`${outcome} delete restores its own projection while preserving a new turn, late terminal update, and ${switchSession ? "session switch" : "active session"}`, async () => {
+    test(`${outcome} delete preserves its own projection with a new turn, late terminal update, and ${switchSession ? "session switch" : "active session"}`, async () => {
       const started = deferred();
       const response = deferred();
       const cached = new Map();
@@ -330,18 +330,56 @@ for (const outcome of ["no-op", "failure"]) {
       const deleting = h.actions.deleteMessage("u1");
       await started.promise;
       const completed = { ...row("a2", "assistant"), content: "late completed reply" };
-      const live = [row("u2", "user"), completed, row("u3", "user"), { ...row("a3", "assistant"), status: "streaming" }];
+      const live = [...h.state().messages.map((message) => message.id === "a2" ? completed : message),
+        row("u3", "user"), { ...row("a3", "assistant"), status: "streaming" }];
       const other = [row("other", "user")];
       cached.set("s", live);
       h.update({ activeSessionId: switchSession ? "other" : "s", messages: switchSession ? other : live,
         isRunning: true, runningSessions: { s: true, ...(switchSession ? { other: true } : {}) } });
       response.resolve();
       await deleting;
-      const restored = [...previous.slice(0, 3), ...live];
+      const restored = [...previous.slice(0, 3), row("u2", "user"), completed,
+        row("u3", "user"), { ...row("a3", "assistant"), status: "streaming" }];
       assert.deepEqual(cached.get("s"), restored);
       assert.deepEqual(h.state().messages, switchSession ? other : restored);
       assert.equal(h.state().isRunning, true);
       assert.equal(h.state().runningSessions.s, true);
+      assert.equal(h.state().error, outcome === "failure" ? "delete failed" : null);
+    });
+  }
+}
+
+for (const outcome of ["no-op", "failure"]) {
+  for (const switchSession of [false, true]) {
+    test(`${outcome} delete preserves a native terminal re-key across ${switchSession ? "session switch" : "active session"}`, async () => {
+      const started = deferred();
+      const response = deferred();
+      const provisional = { ...row("provisional", "assistant"), content: "partial", status: "streaming" };
+      const initial = [...previous, provisional];
+      const cached = new Map();
+      const h = harness({ state: { messages: initial }, runtime: {
+        loadFullSessionMessages: async () => initial,
+        sessionTranscriptCache: cached,
+        cacheSessionTranscript: (id, messages) => cached.set(id, messages),
+      }, api: { deleteSessionMessage: async () => {
+        started.resolve();
+        await response.promise;
+        if (outcome === "failure") throw new Error("delete failed");
+        return { ok: true, deleted: false, deletedCount: 0 };
+      } } });
+      const deleting = h.actions.deleteMessage("provisional");
+      await started.promise;
+      const completed = { ...row("durable-sdk", "assistant"), content: "canonical completion" };
+      const event = { type: "message_end", replacesMessageId: "provisional", message: completed };
+      const live = [...transcript.projectMessageEnd(h.state().messages, event), row("u3", "user")];
+      cached.set("s", live);
+      const other = [row("other", "user")];
+      h.update({ activeSessionId: switchSession ? "other" : "s", messages: switchSession ? other : live });
+      response.resolve();
+      await deleting;
+      const expected = [...previous, completed, row("u3", "user")];
+      assert.deepEqual(cached.get("s"), expected);
+      assert.deepEqual(h.state().messages, switchSession ? other : expected);
       assert.equal(h.state().error, outcome === "failure" ? "delete failed" : null);
     });
   }

@@ -396,55 +396,37 @@ export function createTranscriptSlice({
               }
             : {},
         );
-        const state = get();
-        const index = state.messages.findIndex((message) => message.id === messageId);
-        if (index < 0) return;
-        const target = state.messages[index];
-        let end = index + 1;
-        if (target.role === "user") {
-          while (
-            end < state.messages.length &&
-            state.messages[end].role !== "user"
-          ) {
-            end += 1;
-          }
-        }
-        const previous = state.messages;
-        const next = [...previous.slice(0, index), ...previous.slice(end)];
+        if (!get().messages.some((message) => message.id === messageId)) return;
         const fullWindow = { messageStart: 0, hasMoreBefore: false };
-        runtime.cacheSessionTranscript(sessionId, next, fullWindow);
-        set((current) => ({
-          messages: next,
-          sessionHistory: { ...current.sessionHistory, [sessionId]: fullWindow },
-          error: null,
-          errorCode: null,
-        }));
+        runtime.cacheSessionTranscript(sessionId, get().messages, fullWindow);
+        set({ error: null, errorCode: null });
         try {
           const result = await api.deleteSessionMessage({ sessionId, messageId });
-          if (result.deleted) return;
+          if (!result.deleted) return;
+          // Keep the projection intact until Host confirms the mutation. Late
+          // terminal events can replace provisional IDs while this RPC waits;
+          // restoring an earlier snapshot would resurrect those replaced rows.
+          const current = get();
+          const live = current.activeSessionId === sessionId
+            ? current.messages
+            : runtime.sessionTranscriptCache.get(sessionId) ?? [];
+          const index = live.findIndex((message) => message.id === messageId);
+          if (index < 0) return;
+          let end = index + 1;
+          if (live[index].role === "user") {
+            while (end < live.length && live[end].role !== "user") end += 1;
+          }
+          const next = [...live.slice(0, index), ...live.slice(end)];
+          runtime.cacheSessionTranscript(sessionId, next, fullWindow);
+          set((state) => ({
+            messages: state.activeSessionId === sessionId ? next : state.messages,
+          }));
         } catch (error) {
           set({
             error: error instanceof Error ? error.message : String(error),
             errorCode: (error as { code?: string })?.code ?? null,
           });
         }
-        // A missing durable target is a Host no-op, so undo the optimistic
-        // removal just as on failure. Keep callbacks received during the RPC,
-        // including completed updates, rather than restoring their old values.
-        const current = get();
-        const live = current.activeSessionId === sessionId
-          ? current.messages
-          : runtime.sessionTranscriptCache.get(sessionId) ?? [];
-        const liveById = new Map(live.map((message) => [message.id, message]));
-        const rollback = mergeLiveSessionMessages(
-          previous.map((message) => liveById.get(message.id) ?? message),
-          live,
-        );
-        runtime.cacheSessionTranscript(sessionId, rollback, fullWindow);
-        set((current) => ({
-          messages:
-            current.activeSessionId === sessionId ? rollback : current.messages,
-        }));
       } finally {
         releaseDelete();
         if (pendingMessageDeletes.get(sessionId) === completion) {

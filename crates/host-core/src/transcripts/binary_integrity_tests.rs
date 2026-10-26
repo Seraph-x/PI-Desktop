@@ -72,7 +72,7 @@ fn replacement_file_cannot_reuse_a_verified_generation() {
     let replacement = path.with_extension("replacement");
     fs::copy(&path, &replacement).unwrap();
     replace_message_line(&replacement, "reference");
-    File::open(&replacement)
+    File::options().write(true).open(&replacement)
         .unwrap()
         .set_times(std::fs::FileTimes::new().set_modified(metadata.modified().unwrap()))
         .unwrap();
@@ -84,7 +84,6 @@ fn replacement_file_cannot_reuse_a_verified_generation() {
     assert_eq!(fs::read(path).unwrap(), before);
 }
 
-#[cfg(unix)]
 #[test]
 fn same_size_rewrite_restoring_mtime_cannot_reuse_a_verified_generation() {
     let dir = tempfile::tempdir().unwrap();
@@ -96,7 +95,7 @@ fn same_size_rewrite_restoring_mtime_cannot_reuse_a_verified_generation() {
     let corrupt = raw.replacen("\"image\":0", "\"image\":9", 1);
     assert_ne!(raw, corrupt);
     fs::write(&path, &corrupt).unwrap();
-    File::open(&path)
+    File::options().write(true).open(&path)
         .unwrap()
         .set_times(std::fs::FileTimes::new().set_modified(metadata.modified().unwrap()))
         .unwrap();
