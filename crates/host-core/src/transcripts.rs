@@ -31,6 +31,9 @@ use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+mod binary_integrity;
+#[cfg(test)]
+mod binary_integrity_tests;
 mod binary_migration;
 pub(crate) mod binary_storage;
 #[cfg(test)]
@@ -813,7 +816,8 @@ fn append_line(path: &Path, header: Option<String>, line: String) -> Result<()> 
     file.write_all(buf.as_bytes())?;
     file.flush()?;
     file.sync_data()
-        .with_context(|| format!("flush {}", path.display()))
+        .with_context(|| format!("flush {}", path.display()))?;
+    binary_integrity::appended(path, file)
 }
 
 /// Whether a non-empty file ends in a newline; an empty file counts as
@@ -1127,6 +1131,7 @@ pub fn write_transcript_with_compactions(
         writer.get_ref().sync_data()?;
     }
     swap_into_place(&tmp, &path)?;
+    binary_integrity::invalidate(&path);
     layout::invalidate(data_dir, session_id);
     Ok(())
 }
@@ -1241,6 +1246,7 @@ pub fn update_message(data_dir: &Path, session_id: &str, record: &MessageRecord)
         writer.get_ref().sync_data()?;
     }
     swap_into_place(&tmp, &path)?;
+    binary_integrity::invalidate(&path);
     layout::invalidate(data_dir, session_id);
     Ok(true)
 }
@@ -1534,6 +1540,7 @@ pub fn remove_session_files(data_dir: &Path, session_id: &str) {
         inflight.with_extension("json.tmp"),
         inflight,
     ] {
+        binary_integrity::invalidate(&path);
         if let Err(error) = fs::remove_file(&path) {
             if error.kind() != std::io::ErrorKind::NotFound {
                 tracing::warn!(path = %path.display(), %error, "transcript cleanup failed");

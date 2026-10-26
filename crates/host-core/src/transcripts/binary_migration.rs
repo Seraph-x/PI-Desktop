@@ -48,10 +48,12 @@ pub(super) fn prepare(path: &Path, header: Option<&str>) -> Result<bool> {
     let mut has_session_header = false;
     if let Ok(value) = serde_json::from_slice::<Value>(&raw) {
         if current_header(&value)? {
+            binary_integrity::verify(path, &mut reader)?;
             return Ok(false);
         }
         has_session_header = value["type"] == "session";
     }
+    binary_integrity::verify(path, &mut reader)?;
     reader.seek(SeekFrom::Start(0))?;
     let tmp = path.with_extension("binary.tmp");
     let mut writer = BufWriter::new(File::create(&tmp)?);
@@ -80,14 +82,22 @@ pub(super) fn prepare(path: &Path, header: Option<&str>) -> Result<bool> {
                     replacement = Some(value);
                 }
                 Some("message" | "compaction" | "revision") => {
-                    let decoded = binary_storage::decode(value.clone())?;
-                    let encoded = binary_storage::encode(decoded.clone())?;
-                    anyhow::ensure!(
-                        binary_storage::decode(encoded.clone())? == decoded,
-                        "lossless transcript conversion verification failed"
-                    );
-                    if encoded != value {
-                        replacement = Some(encoded);
+                    // Readers historically skip malformed plain records. Do
+                    // not turn one into an encoded row whose typed read must
+                    // fail explicitly. Existing encoded rows were validated
+                    // before opening the conversion temporary.
+                    if value.get("binaryStorage").is_some()
+                        || binary_storage::validate_record(value.clone()).is_ok()
+                    {
+                        let decoded = binary_storage::decode(value.clone())?;
+                        let encoded = binary_storage::encode(decoded.clone())?;
+                        anyhow::ensure!(
+                            binary_storage::decode(encoded.clone())? == decoded,
+                            "lossless transcript conversion verification failed"
+                        );
+                        if encoded != value {
+                            replacement = Some(encoded);
+                        }
                     }
                 }
                 _ => {}
@@ -112,5 +122,6 @@ pub(super) fn prepare(path: &Path, header: Option<&str>) -> Result<bool> {
     writer.get_ref().sync_data()?;
     drop(writer);
     swap_into_place(&tmp, path)?;
+    binary_integrity::invalidate(path);
     Ok(true)
 }

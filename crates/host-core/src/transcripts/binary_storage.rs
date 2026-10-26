@@ -636,14 +636,18 @@ pub(crate) fn decode(mut value: Value) -> Result<Value> {
     Ok(value)
 }
 
-pub(super) fn read<T: serde::de::DeserializeOwned>(text: &str) -> Result<T> {
-    let value: Value = serde_json::from_str(text).map_err(|e| {
+fn parse_line(text: &str) -> Result<Value> {
+    serde_json::from_str(text).map_err(|e| {
         if text.contains("\"binaryStorage\"") {
             invalid(e.to_string())
         } else {
             anyhow!(e)
         }
-    })?;
+    })
+}
+
+pub(super) fn read<T: serde::de::DeserializeOwned>(text: &str) -> Result<T> {
+    let value = parse_line(text)?;
     let encoded = value.get("binaryStorage").is_some();
     let decoded = decode(value)?;
     serde_json::from_value(decoded).map_err(|e| {
@@ -653,6 +657,31 @@ pub(super) fn read<T: serde::de::DeserializeOwned>(text: &str) -> Result<T> {
             anyhow!(e)
         }
     })
+}
+
+/// Validate the storage representation without making historical plain rows
+/// obey newer business schemas. Encoded known rows have the same typed
+/// validation and explicit corruption errors as their normal read paths.
+pub(super) fn validate_line(text: &str) -> Result<()> {
+    let value = parse_line(text)?;
+    let encoded = value.get("binaryStorage").is_some();
+    let value = decode(value)?;
+    if !encoded {
+        return Ok(());
+    }
+    validate_record(value).map_err(|error| invalid(error.to_string()))
+}
+
+pub(super) fn validate_record(value: Value) -> serde_json::Result<()> {
+    match value.get("type").and_then(Value::as_str) {
+        Some("message") => serde_json::from_value::<super::MessageRecord>(value).map(|_| ()),
+        Some("compaction") => serde_json::from_value::<super::CompactionRecord>(value).map(|_| ()),
+        Some("revision") => serde_json::from_value::<super::RevisionRecord>(value).map(|_| ()),
+        Some("revision_live") => {
+            serde_json::from_value::<super::LiveRevisionRecord>(value).map(|_| ())
+        }
+        _ => Ok(()),
+    }
 }
 
 /// Relocation changes structured paths. Apply that same intentional change to
