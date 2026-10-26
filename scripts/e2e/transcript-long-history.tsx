@@ -272,31 +272,27 @@ export async function transcriptLongHistoryProbe() {
     assert(disclosure.getAttribute("aria-expanded") === expanded, "stream reset explicit disclosure state");
     const scroller = element(".thread-scroll");
     scroller.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: -200 }));
-    scroller.scrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight - 240);
+    const requestedHeight = scroller.scrollHeight;
+    const requestedViewport = scroller.clientHeight;
+    scroller.scrollTop = Math.max(0, requestedHeight - requestedViewport - 240);
     scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
     await settled();
-    const scrollTrace: unknown[] = [];
-    const scrollMetrics = (phase: string) => ({ phase, at: performance.now(),
-      top: scroller.scrollTop, height: scroller.scrollHeight, viewport: scroller.clientHeight,
-      disclosureTop: disclosure.getBoundingClientRect().top,
-      disclosureHeight: disclosure.parentElement?.getBoundingClientRect().height,
-      expanded: disclosure.getAttribute("aria-expanded"),
-      activeAnimations: host.getAnimations({ subtree: true }).map((animation) => ({
-        state: animation.playState,
-        property: (animation as CSSTransition).transitionProperty,
-        target: ((animation.effect as KeyframeEffect | null)?.target as HTMLElement | null)?.className,
-      })),
-    });
-    const recordScroll = () => scrollTrace.push(scrollMetrics("scroll"));
-    scroller.addEventListener("scroll", recordScroll);
     const readingTop = scroller.scrollTop;
-    scrollTrace.push(scrollMetrics("before-stream"));
     await stream(largest, " reader-stays");
-    scrollTrace.push(scrollMetrics("after-stream"));
-    scroller.removeEventListener("scroll", recordScroll);
-    console.error("TRANSCRIPT_READING_TRACE", JSON.stringify(scrollTrace));
-    assert(Math.abs(scroller.scrollTop - readingTop) < 2,
-      `stream stole the reader's scroll position: ${JSON.stringify(scrollTrace)}`);
+    const afterTop = scroller.scrollTop;
+    if (Math.abs(afterTop - readingTop) >= 2) {
+      console.error("TRANSCRIPT_READING_FAILURE", JSON.stringify({
+        readingTop, afterTop, requestedHeight, requestedViewport,
+        afterHeight: scroller.scrollHeight, afterViewport: scroller.clientHeight,
+        disclosureTop: disclosure.getBoundingClientRect().top,
+        expanded: disclosure.getAttribute("aria-expanded"),
+        animations: host.getAnimations({ subtree: true }).map((animation) => ({
+          state: animation.playState, property: (animation as CSSTransition).transitionProperty,
+          target: ((animation.effect as KeyframeEffect | null)?.target as HTMLElement | null)?.className,
+        })),
+      }));
+    }
+    assert(Math.abs(afterTop - readingTop) < 2, "stream stole the reader's scroll position");
 
     // Terminal re-key must replace exactly the provisional row, survive cache
     // reselection and expose fresh copy text through the real turn toolbar.
@@ -413,7 +409,8 @@ export async function transcriptLongHistoryProbe() {
     assert(reads.every((read) => read.limit === 100), "ordinary selection requested unbounded Host history");
     assert(errors.length === 0, `render errors: ${errors.map(String)}`);
     return { ok: true, workCounts, hostPageSize: 100, simultaneousRunningSessions: 3,
-      diagnostics: { scrollTrace, eventToSettledDomMs: latencies, longTasksMs: observer ? longTasks : null,
+      diagnostics: { readingPosition: { readingTop, afterTop, requestedHeight, requestedViewport },
+        eventToSettledDomMs: latencies, longTasksMs: observer ? longTasks : null,
         heapBefore, heapAfter: heap() } };
   } finally {
     flushSync(() => root.unmount());

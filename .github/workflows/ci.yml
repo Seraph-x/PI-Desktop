@@ -42,7 +42,7 @@ jobs:
       - run: pnpm build:js
       - name: Repeat original transcript assertion with geometry diagnostics
         run: |
-          for run in 1 2 3; do
+          for run in 1 2 3 4 5; do
             echo "Transcript repeat ${run}, production source ${{ matrix.ref }}"
             xvfb-run --auto-servernum node scripts/e2e-transcript-render.mjs || exit $?
           done
