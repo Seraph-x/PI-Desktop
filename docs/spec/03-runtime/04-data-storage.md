@@ -609,7 +609,7 @@ Refresh (spec 13 §6/§9) upserts `discovered` rows and **never overwrites
 `source='user'`** rows. Recent-model MRU stays in `kv(cache)` — it is a
 bounded display list, not relational data.
 
-Schema v26 adds nullable `discovery_state`, distinct from metadata deprecation.
+Schema v25 adds nullable `discovery_state`, distinct from metadata deprecation.
 The v24 upgrade backs up first, adds the field transactionally, and marks
 existing discovered rows as past publication evidence. User-owned rows remain
 unknown. No provider configuration, credentials, sessions, or turns are changed.

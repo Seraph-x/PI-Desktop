@@ -3,7 +3,7 @@ import { X509Certificate } from "node:crypto";
 import { once } from "node:events";
 import { readFileSync } from "node:fs";
 import { createServer as createHttpsServer } from "node:https";
-import { createServer as createHttpServer } from "node:http";
+import { createServer as createHttpServer, request as httpRequest } from "node:http";
 import { connect, type Socket } from "node:net";
 import { join } from "node:path";
 import { getCACertificates, setDefaultCACertificates, type TLSSocket } from "node:tls";
@@ -14,9 +14,10 @@ import { probeModelList, probeProviderEndpoint } from "../../apps/desktop/electr
 app.setPath("userData", process.argv[2]);
 app.commandLine.appendSwitch("ozone-platform", "headless");
 app.disableHardwareAcceleration();
-let diagnosticPhase = "startup";
+// Electron otherwise displays asynchronous fixture assertions and leaves the
+// process running until the wrapper kills it. Preserve an immediate failure.
 process.on("uncaughtException", (error) => {
-  console.error("CERT_UNCAUGHT", diagnosticPhase, error);
+  console.error(error);
   app.exit(1);
 });
 const fixture = process.argv[3];
@@ -42,9 +43,15 @@ const server = createHttpsServer({ key, cert, ca: cert, requestCert: true, rejec
 const proxy = createHttpServer();
 let tunnels = 0;
 proxy.on("connect", (req, client, head) => {
-  assert.equal(req.headers["proxy-authorization"], `Basic ${Buffer.from("fixture:password").toString("base64")}`);
   const target = new URL(`http://${req.url}`);
-  assert.equal(target.hostname, "localhost");
+  const address = server.address();
+  // This proxy only serves the local TLS fixture. Chromium background traffic
+  // is unrelated to provider discovery and must never be forwarded to it.
+  if (!address || typeof address === "string" || target.hostname !== "localhost" || Number(target.port) !== address.port) {
+    client.end("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n");
+    return;
+  }
+  assert.equal(req.headers["proxy-authorization"], `Basic ${Buffer.from("fixture:password").toString("base64")}`);
   tunnels++;
   const upstream = connect({ host: "127.0.0.1", port: Number(target.port) });
   sockets.add(upstream);
@@ -63,17 +70,6 @@ for (const listener of [server, proxy]) listener.on("connection", (socket) => {
   socket.on("close", () => sockets.delete(socket));
 });
 
-// Sequential proxy cases must not reuse Chromium sockets from the prior route.
-// Electron documents that setProxy alone does not discard pooled connections.
-async function configureFixtureProxy(settings: unknown): Promise<void> {
-  diagnosticPhase = "step-1"; console.error("CERT_STEP", diagnosticPhase, "before");
-  await applyNetworkProxy(settings);
-  console.error("CERT_STEP", diagnosticPhase, "after");
-  diagnosticPhase = "step-2"; console.error("CERT_STEP", diagnosticPhase, "before");
-  await session.defaultSession.closeAllConnections();
-  console.error("CERT_STEP", diagnosticPhase, "after");
-}
-
 void app.whenReady().then(async () => {
   try {
     // Trust only this local fixture, only in this isolated Electron session.
@@ -85,16 +81,25 @@ void app.whenReady().then(async () => {
     setDefaultCACertificates([...getCACertificates("default"), cert]);
     server.listen(0, "127.0.0.1");
     proxy.listen(0, "127.0.0.1");
-    diagnosticPhase = "step-3"; console.error("CERT_STEP", diagnosticPhase, "before");
     await Promise.all([once(server, "listening"), once(proxy, "listening")]);
-    console.error("CERT_STEP", diagnosticPhase, "after");
     const address = server.address();
     const proxyAddress = proxy.address();
     assert.ok(address && typeof address !== "string" && proxyAddress && typeof proxyAddress !== "string");
     const baseUrl = `https://localhost:${address.port}/v1`;
-    diagnosticPhase = "step-4"; console.error("CERT_STEP", diagnosticPhase, "before");
-    await configureFixtureProxy({ mode: "direct" });
-    console.error("CERT_STEP", diagnosticPhase, "after");
+    // Chromium can make background requests through this session's proxy.
+    // They must be denied, never forwarded or counted as fixture traffic.
+    const background = httpRequest({
+      host: "127.0.0.1", port: proxyAddress.port, method: "CONNECT",
+      path: "background.invalid:443",
+      headers: { "proxy-authorization": `Basic ${Buffer.from("fixture:password").toString("base64")}` },
+    });
+    const rejected = once(background, "connect");
+    background.end();
+    const [response, socket] = await rejected;
+    assert.equal(response.statusCode, 502);
+    socket.destroy();
+    assert.equal(tunnels, 0, "background traffic must not count as a fixture tunnel");
+    await applyNetworkProxy({ mode: "direct" });
     let baselineTimer: ReturnType<typeof setTimeout> | undefined;
     const baselineTimeout = new Promise<{ kind: "timeout" }>((resolve) => {
       baselineTimer = setTimeout(() => resolve({ kind: "timeout" }), 8_000);
@@ -120,57 +125,31 @@ void app.whenReady().then(async () => {
     assert.equal(requests, 0, "the original Electron 43 failure precedes HTTP");
     console.log(`baseline: Electron 43 net.fetch ${baselineOutcome.kind === "timeout" ? "stalled" : "failed"} before HTTP`);
     const options = { baseUrl, apiKey: "fixture", signal: AbortSignal.timeout(8_000) };
-    diagnosticPhase = "step-5"; console.error("CERT_STEP", diagnosticPhase, "before");
     assert.deepEqual((await probeModelList(options)).models, [{ modelId: "fixture-model", displayName: "fixture-model" }]);
-    console.error("CERT_STEP", diagnosticPhase, "after");
-    diagnosticPhase = "step-6"; console.error("CERT_STEP", diagnosticPhase, "before");
     assert.equal((await probeProviderEndpoint(options)).status, 200);
-    console.error("CERT_STEP", diagnosticPhase, "after");
-    diagnosticPhase = "step-7"; console.error("CERT_STEP", diagnosticPhase, "before");
     await assert.rejects(probeModelList({ ...options, apiKey: "wrong" }), { status: 401 });
-    console.error("CERT_STEP", diagnosticPhase, "after");
-    diagnosticPhase = "step-8"; console.error("CERT_STEP", diagnosticPhase, "before");
-    await configureFixtureProxy({ mode: "custom", url: `http://fixture:password@127.0.0.1:${proxyAddress.port}`, bypass: "<-loopback>" });
-    console.error("CERT_STEP", diagnosticPhase, "after");
+    await applyNetworkProxy({ mode: "custom", url: `http://fixture:password@127.0.0.1:${proxyAddress.port}`, bypass: "<-loopback>" });
     const before = tunnels;
-    diagnosticPhase = "step-9"; console.error("CERT_STEP", diagnosticPhase, "before");
     assert.equal((await probeProviderEndpoint(options)).status, 200);
-    console.error("CERT_STEP", diagnosticPhase, "after");
     assert.ok(tunnels > before, "the retry must use the configured authenticated proxy");
-    diagnosticPhase = "step-10"; console.error("CERT_STEP", diagnosticPhase, "before");
-    await configureFixtureProxy({ mode: "custom", url: `http://fixture:password@127.0.0.1:${proxyAddress.port}` });
-    console.error("CERT_STEP", diagnosticPhase, "after");
+    await applyNetworkProxy({ mode: "custom", url: `http://fixture:password@127.0.0.1:${proxyAddress.port}` });
     const beforeBypass = tunnels;
-    diagnosticPhase = "step-11"; console.error("CERT_STEP", diagnosticPhase, "before");
     assert.equal((await probeProviderEndpoint(options)).status, 200);
-    console.error("CERT_STEP", diagnosticPhase, "after");
     assert.equal(tunnels, beforeBypass, "localhost bypass must apply to both transports");
-    diagnosticPhase = "step-12"; console.error("CERT_STEP", diagnosticPhase, "before");
-    await configureFixtureProxy({ mode: "direct" });
-    console.error("CERT_STEP", diagnosticPhase, "after");
+    await applyNetworkProxy({ mode: "direct" });
     mode = "redirect";
-    diagnosticPhase = "step-13"; console.error("CERT_STEP", diagnosticPhase, "before");
     await assert.rejects(probeModelList(options), /left the configured origin/);
-    console.error("CERT_STEP", diagnosticPhase, "after");
     mode = "stall";
     const controller = new AbortController();
     const started = new Promise<void>((resolve) => { requestStarted = resolve; });
     const pending = probeModelList({ ...options, signal: controller.signal });
-    diagnosticPhase = "step-14"; console.error("CERT_STEP", diagnosticPhase, "before");
     await started;
-    console.error("CERT_STEP", diagnosticPhase, "after");
     controller.abort();
-    diagnosticPhase = "step-15"; console.error("CERT_STEP", diagnosticPhase, "before");
     await assert.rejects(pending, { name: "AbortError" });
-    console.error("CERT_STEP", diagnosticPhase, "after");
     console.log("provider client certificate E2E passed");
-    diagnosticPhase = "step-16"; console.error("CERT_STEP", diagnosticPhase, "before");
     await disposeSystemProxyRelay();
-    console.error("CERT_STEP", diagnosticPhase, "after");
     for (const socket of sockets) socket.destroy();
-    diagnosticPhase = "step-17"; console.error("CERT_STEP", diagnosticPhase, "before");
     await Promise.all([new Promise<void>((resolve) => server.close(() => resolve())), new Promise<void>((resolve) => proxy.close(() => resolve()))]);
-    console.error("CERT_STEP", diagnosticPhase, "after");
     app.exit(0);
   } catch (error) {
     console.error(error);

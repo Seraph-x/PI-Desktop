@@ -357,3 +357,59 @@ fn headerless_and_empty_legacy_files_receive_a_current_header_once() {
         );
     }
 }
+
+#[test]
+fn current_format_corruption_blocks_appends_and_updates_without_changing_files() {
+    for fault in ["image", "version"] {
+        for update in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = transcript_path(dir.path(), "s").unwrap();
+            let record = screenshot();
+            append_message(dir.path(), "s", "old", &record).unwrap();
+            let raw = fs::read_to_string(&path).unwrap();
+            let mut lines: Vec<Value> = raw
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+            if fault == "image" {
+                lines[1]["binaryStorage"]["refs"][0]["image"] = json!(999);
+            } else {
+                lines[1]["binaryStorage"]["version"] = json!(999);
+            }
+            let corrupt = lines
+                .iter()
+                .map(Value::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+                + "\n";
+            fs::write(&path, &corrupt).unwrap();
+            let mut next = record.clone();
+            next.id = "next".into();
+            let result = if update {
+                update_message(dir.path(), "s", &record).map(|_| ())
+            } else {
+                append_message(dir.path(), "s", "old", &next)
+            };
+            assert!(
+                result.is_err(),
+                "{fault}, update={update} must refuse corrupted existing storage"
+            );
+            assert_eq!(fs::read_to_string(&path).unwrap(), corrupt);
+        }
+    }
+}
+
+#[test]
+fn rust_rejects_unknown_nested_mirror_part_fields_like_typescript() {
+    let mut encoded = binary_storage::encode(nested_mirror(1)).unwrap();
+    let part = encoded["binaryStorage"]["texts"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .flat_map(|text| text["parts"].as_array_mut().unwrap())
+        .find(|part| part.get("text").is_some())
+        .unwrap();
+    part["unknown"] = json!(true);
+    let error = binary_storage::decode(encoded).unwrap_err();
+    assert!(binary_storage::is_error(&error), "{error}");
+}

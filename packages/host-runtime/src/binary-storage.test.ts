@@ -288,3 +288,15 @@ describe("nested proven JSON mirrors", () => {
     expect(() => decodeBinaryStorage(encoded)).toThrow(/binary storage.*text.*token/i);
   });
 });
+
+describe("nested mirror corruption parity", () => {
+  it("rejects unknown fields in a text-reference part", () => {
+    const encoded = structuredClone(nestedGolden.encoded) as StoredMirror;
+    const part = encoded.binaryStorage.texts
+      .flatMap((text) => text.parts)
+      .find((part) => typeof part !== "string" && "text" in part);
+    if (!part || typeof part === "string") throw new Error("Missing mirror part fixture");
+    Object.assign(part, { unknown: true });
+    expect(() => decodeBinaryStorage(encoded)).toThrow(/unexpected envelope fields/i);
+  });
+});

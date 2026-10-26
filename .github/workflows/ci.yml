@@ -28,9 +28,25 @@ jobs:
           sudo chown root:root "$sandbox"
           sudo chmod 4755 "$sandbox"
       - run: pnpm build:js
-      - name: Repeat isolated certificate fixture five times
+      - name: Repeat isolated certificate fixture ten times
         run: |
-          for run in 1 2 3 4 5; do
+          for run in 1 2 3 4 5 6 7 8 9 10; do
             echo "Certificate fixture repeat ${run}"
             xvfb-run --auto-servernum node scripts/e2e-provider-client-certificate.mjs || exit $?
           done
+
+  storage-integrity:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test -p host-core --locked transcripts::
+      - run: cargo test -p host-core --locked sessions::
