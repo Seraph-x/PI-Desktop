@@ -41,7 +41,9 @@ export async function fetchHttpsMetadata(
     throw new Error("provider metadata retry requires an HTTPS URL without userinfo");
   }
   const host = target.hostname.replace(/^\[|\]$/g, "");
+  console.error("CERT_HTTPS connect start");
   const raw = await connectWithSignal(() => connect(host, Number(target.port) || 443), init.signal);
+  console.error("CERT_HTTPS connected");
   // Keep the bundled/extra roots and OS roots, as the sidecar does (#1187).
   // This is per-request: never change the process-wide TLS defaults.
   let socket;
@@ -63,8 +65,10 @@ export async function fetchHttpsMetadata(
   const abort = () => socket.destroy(new DOMException("The operation was aborted", "AbortError"));
   init.signal.addEventListener("abort", abort, { once: true });
   try {
+    console.error("CERT_HTTPS TLS start");
     const connected = once(socket, "secureConnect", { signal: init.signal });
     await connected;
+    console.error("CERT_HTTPS TLS ready");
     init.signal.throwIfAborted();
     return await new Promise<Response>((resolve, reject) => {
       const req = request(target, {
@@ -95,6 +99,7 @@ export async function fetchHttpsMetadata(
         })().catch(reject);
       });
       req.once("error", reject);
+      console.error("CERT_HTTPS request");
       req.end();
     });
   } catch (error) {

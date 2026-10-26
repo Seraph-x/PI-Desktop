@@ -17,8 +17,12 @@ export function createProviderMetadataFetch(
 ): ProviderMetadataFetch {
   return async (url, init) => {
     try {
-      return await primary(url, init);
+      console.error("CERT_PRIMARY start");
+      const response = await primary(url, init);
+      console.error("CERT_PRIMARY response");
+      return response;
     } catch (error) {
+      console.error("CERT_PRIMARY error", error instanceof Error ? error.message : "unknown");
       // Electron 43 drops the certificate responder before sending HTTP.
       // Never retry unrelated TLS failures, HTTP errors or cancelled work.
       if (
@@ -28,6 +32,7 @@ export function createProviderMetadataFetch(
         (init.method !== undefined && init.method !== "GET" && init.method !== "OPTIONS")
       ) throw error;
       init.signal.throwIfAborted();
+      console.error("CERT_FALLBACK start");
       return withoutClientCertificate(url, init);
     }
   };

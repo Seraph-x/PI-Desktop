@@ -8,7 +8,9 @@ import type { ProviderMetadataFetch } from "./provider-metadata-fetch";
  * including Direct, System/PAC, custom proxies and bypass rules. */
 export const fetchProviderWithoutClientCertificate: ProviderMetadataFetch = async (url, init) => {
   init.signal.throwIfAborted();
+  console.error("CERT_RELAY start");
   const relay = parseProxyUrl(await ensureSystemProxyRelay());
+  console.error("CERT_RELAY ready");
   init.signal.throwIfAborted();
   if (!relay.ok) throw new Error("invalid provider proxy relay");
   return fetchHttpsMetadata(url, init, (host, port) => socks5Connect(relay.value, host, port));
