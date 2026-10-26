@@ -48,5 +48,5 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test -p host-core --locked transcripts::
-      - run: cargo test -p host-core --locked sessions::
+      - run: 'cargo test -p host-core --locked transcripts::'
+      - run: 'cargo test -p host-core --locked sessions::'

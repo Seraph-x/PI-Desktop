@@ -81,23 +81,20 @@ pub(super) fn prepare(path: &Path, header: Option<&str>) -> Result<bool> {
                     value["schema"] = Value::from(TRANSCRIPT_SCHEMA);
                     replacement = Some(value);
                 }
-                Some("message" | "compaction" | "revision") => {
-                    // Readers historically skip malformed plain records. Do
-                    // not turn one into an encoded row whose typed read must
-                    // fail explicitly. Existing encoded rows were validated
-                    // before opening the conversion temporary.
+                // Keep malformed historical plain records skippable. Existing
+                // encoded rows were validated before opening the temporary.
+                Some("message" | "compaction" | "revision")
                     if value.get("binaryStorage").is_some()
-                        || binary_storage::validate_record(value.clone()).is_ok()
-                    {
-                        let decoded = binary_storage::decode(value.clone())?;
-                        let encoded = binary_storage::encode(decoded.clone())?;
-                        anyhow::ensure!(
-                            binary_storage::decode(encoded.clone())? == decoded,
-                            "lossless transcript conversion verification failed"
-                        );
-                        if encoded != value {
-                            replacement = Some(encoded);
-                        }
+                        || binary_storage::validate_record(value.clone()).is_ok() =>
+                {
+                    let decoded = binary_storage::decode(value.clone())?;
+                    let encoded = binary_storage::encode(decoded.clone())?;
+                    anyhow::ensure!(
+                        binary_storage::decode(encoded.clone())? == decoded,
+                        "lossless transcript conversion verification failed"
+                    );
+                    if encoded != value {
+                        replacement = Some(encoded);
                     }
                 }
                 _ => {}
