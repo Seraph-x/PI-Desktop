@@ -275,9 +275,28 @@ export async function transcriptLongHistoryProbe() {
     scroller.scrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight - 240);
     scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
     await settled();
+    const scrollTrace: unknown[] = [];
+    const scrollMetrics = (phase: string) => ({ phase, at: performance.now(),
+      top: scroller.scrollTop, height: scroller.scrollHeight, viewport: scroller.clientHeight,
+      disclosureTop: disclosure.getBoundingClientRect().top,
+      disclosureHeight: disclosure.parentElement?.getBoundingClientRect().height,
+      expanded: disclosure.getAttribute("aria-expanded"),
+      activeAnimations: host.getAnimations({ subtree: true }).map((animation) => ({
+        state: animation.playState,
+        property: (animation as CSSTransition).transitionProperty,
+        target: ((animation.effect as KeyframeEffect | null)?.target as HTMLElement | null)?.className,
+      })),
+    });
+    const recordScroll = () => scrollTrace.push(scrollMetrics("scroll"));
+    scroller.addEventListener("scroll", recordScroll);
     const readingTop = scroller.scrollTop;
+    scrollTrace.push(scrollMetrics("before-stream"));
     await stream(largest, " reader-stays");
-    assert(Math.abs(scroller.scrollTop - readingTop) < 2, "stream stole the reader's scroll position");
+    scrollTrace.push(scrollMetrics("after-stream"));
+    scroller.removeEventListener("scroll", recordScroll);
+    console.error("TRANSCRIPT_READING_TRACE", JSON.stringify(scrollTrace));
+    assert(Math.abs(scroller.scrollTop - readingTop) < 2,
+      `stream stole the reader's scroll position: ${JSON.stringify(scrollTrace)}`);
 
     // Terminal re-key must replace exactly the provisional row, survive cache
     // reselection and expose fresh copy text through the real turn toolbar.
@@ -394,7 +413,7 @@ export async function transcriptLongHistoryProbe() {
     assert(reads.every((read) => read.limit === 100), "ordinary selection requested unbounded Host history");
     assert(errors.length === 0, `render errors: ${errors.map(String)}`);
     return { ok: true, workCounts, hostPageSize: 100, simultaneousRunningSessions: 3,
-      diagnostics: { eventToSettledDomMs: latencies, longTasksMs: observer ? longTasks : null,
+      diagnostics: { scrollTrace, eventToSettledDomMs: latencies, longTasksMs: observer ? longTasks : null,
         heapBefore, heapAfter: heap() } };
   } finally {
     flushSync(() => root.unmount());
