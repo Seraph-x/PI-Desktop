@@ -58,6 +58,13 @@ for (const listener of [server, proxy]) listener.on("connection", (socket) => {
   socket.on("close", () => sockets.delete(socket));
 });
 
+// Sequential proxy cases must not reuse Chromium sockets from the prior route.
+// Electron documents that setProxy alone does not discard pooled connections.
+async function configureFixtureProxy(settings: unknown): Promise<void> {
+  await applyNetworkProxy(settings);
+  await session.defaultSession.closeAllConnections();
+}
+
 void app.whenReady().then(async () => {
   try {
     // Trust only this local fixture, only in this isolated Electron session.
@@ -74,7 +81,7 @@ void app.whenReady().then(async () => {
     const proxyAddress = proxy.address();
     assert.ok(address && typeof address !== "string" && proxyAddress && typeof proxyAddress !== "string");
     const baseUrl = `https://localhost:${address.port}/v1`;
-    await applyNetworkProxy({ mode: "direct" });
+    await configureFixtureProxy({ mode: "direct" });
     let baselineTimer: ReturnType<typeof setTimeout> | undefined;
     const baselineTimeout = new Promise<{ kind: "timeout" }>((resolve) => {
       baselineTimer = setTimeout(() => resolve({ kind: "timeout" }), 8_000);
@@ -103,15 +110,15 @@ void app.whenReady().then(async () => {
     assert.deepEqual((await probeModelList(options)).models, [{ modelId: "fixture-model", displayName: "fixture-model" }]);
     assert.equal((await probeProviderEndpoint(options)).status, 200);
     await assert.rejects(probeModelList({ ...options, apiKey: "wrong" }), { status: 401 });
-    await applyNetworkProxy({ mode: "custom", url: `http://fixture:password@127.0.0.1:${proxyAddress.port}`, bypass: "<-loopback>" });
+    await configureFixtureProxy({ mode: "custom", url: `http://fixture:password@127.0.0.1:${proxyAddress.port}`, bypass: "<-loopback>" });
     const before = tunnels;
     assert.equal((await probeProviderEndpoint(options)).status, 200);
     assert.ok(tunnels > before, "the retry must use the configured authenticated proxy");
-    await applyNetworkProxy({ mode: "custom", url: `http://fixture:password@127.0.0.1:${proxyAddress.port}` });
+    await configureFixtureProxy({ mode: "custom", url: `http://fixture:password@127.0.0.1:${proxyAddress.port}` });
     const beforeBypass = tunnels;
     assert.equal((await probeProviderEndpoint(options)).status, 200);
     assert.equal(tunnels, beforeBypass, "localhost bypass must apply to both transports");
-    await applyNetworkProxy({ mode: "direct" });
+    await configureFixtureProxy({ mode: "direct" });
     mode = "redirect";
     await assert.rejects(probeModelList(options), /left the configured origin/);
     mode = "stall";
