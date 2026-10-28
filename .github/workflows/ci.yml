@@ -1,4 +1,4 @@
-name: Fixed-head transcript comparison
+name: Transcript completion diagnostics
 on:
   workflow_dispatch:
     inputs:
@@ -24,14 +24,14 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends --yes openbox xauth xvfb
-      - name: Compare three original runs and the same added regression
+      - name: Diagnose hidden and visible completion frames on both fixed heads
         env:
           COMPARISON_BASE: b91f35122f8dea64a610453fd1a9ecf33e57ce1b
           COMPARISON_CANDIDATE: ${{ inputs.candidate }}
-        run: node scripts/compare-transcript-scroll.mjs
+        run: node scripts/diagnose-transcript-completion.mjs
       - name: Retain every result, including failures
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: fixed-head-transcript-comparison
+          name: transcript-completion-diagnostics
           path: ${{ runner.temp }}/transcript-comparison-artifacts
